@@ -1,105 +1,50 @@
 #!/usr/bin/env python3
 
-import sys
+import paho.mqtt.client as mqtt
 import serial
-import subprocess
 
-################
-#Error display #
-################
-def show_error():
-	ft = sys.exc_info()[0]
-	fv = sys.exc_info()[1]
-	print("Fout type: %s" % ft )
-	print("Fout waarde: %s" % fv )
-	return
+ser = serial.Serial('/dev/ttyMetertrekker', 115200, timeout=1, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS)
 
-################################################################################################################################################
-#Main program
-################################################################################################################################################
-print ("DSMR P1 uitlezer")
-print ("Control-C om te stoppen")
+mqtt_broker = "localhost"
+mqtt_port = 1883
+mqtt_user = "p1meter"
+mqtt_password = ""
+mqtt_qos = 0
+mqtt_retain = False
 
-#Set COM port config
-ser = serial.Serial()
-ser.baudrate = 9600
-ser.bytesize=serial.SEVENBITS
-ser.parity=serial.PARITY_EVEN
-ser.stopbits=serial.STOPBITS_ONE
-ser.xonxoff=0
-ser.rtscts=0
-ser.timeout=20
-ser.port="/dev/ttyMetertrekker"
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("Connected to MQTT broker")
+    else:
+        print("Failed to connect to MQTT broker with error code: ", rc)
 
-#Open COM port
-try:
-	ser.open()
-except:
-	sys.exit ("Fout bij het openen van %s. Programma afgebroken."  % ser.name)      
+def on_disconnect(client, userdata, rc):
+    print("Disconnected from MQTT broker with error code: ", rc)
+    time.sleep(5)
+    client.reconnect()
 
-while 1:
-	p1_line=''
+client = mqtt.Client()
+client.username_pw_set(username=mqtt_user, password=mqtt_password)
+client.on_connect = on_connect
+client.on_disconnect = on_disconnect
+client.connect(mqtt_broker, mqtt_port)
 
-	try:
-		p1_raw = ser.readline()
-	except:
-		sys.exit ("Seriele poort %s kan niet gelezen worden. Programma afgebroken." % ser.name )      
 
-	p1_str=str(p1_raw, "utf-8")
-	p1_line=p1_str.strip()
+while True:
+    data = ser.readline().decode('utf-8').strip()
+    if "(" in data: 
+        topic = data.split("(")[0]
+        #print(topic)
+        message = data[data.find("(") + 1:data.find(")")]
+        remainder = ""
+        if "*" in message:
+            message, remainder = message.split("*")
+            #remainder = remainder[:-1]
+        if remainder:
+            message = f"{message} {remainder}"
+        topic = 'p1meter/' + topic
+        print(topic, message)
+        client.publish(topic, message)
 
-	print (p1_line)
+client.disconnect()
 
-	if p1_line[0:9] == "1-0:1.8.1":
-		print("daldag      ", p1_line[10:15])
-		meter = int(float(p1_line[10:15]))
-		subprocess.run(
-			[
-				"mqtt-simple",
-				"-h",
-				"houseparty.local",
-				"-p",
-				"p1meter/dal",
-				"-m",
-				str(meter)+" KWh",
-			]
-		)
-	elif p1_line[0:9] == "1-0:1.8.2":
-		print("piekdag     ", p1_line[10:15])
-		meter = int(float(p1_line[10:15]))
-		subprocess.run(
-			[
-				"mqtt-simple",
-				"-h",
-				"houseparty.local",
-				"-p",
-				"p1meter/piek",
-				"-m",
-				str(meter)+" KWh",
-			]
-		)
-#	print "meter totaal  ", meter
-
-# Huidige stroomafname: 1-0:1.7.0
-	elif p1_line[0:9] == "1-0:1.7.0":
-		print("Afgenomen vermogen      ", int(float(p1_line[10:17])*1000), " W")
-		meter = int(float(p1_line[10:17])*1000)
-		subprocess.run(
-			[
-				"mqtt-simple",
-				"-h",
-				"localhost",
-				"-p",
-				"p1meter/vermogen",
-				"-m",
-				str(meter)+" W",
-			]
-		)
-	else:
-		pass
-
-#Close port and show status
-try:
-	ser.close()
-except:
-	sys.exit ("Oops %s. Programma afgebroken." % ser.name )  
