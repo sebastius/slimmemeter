@@ -1,5 +1,5 @@
 # slimmemeter
-Slimme meter uitlezen (ik heb een oudje)
+Slimme meter uitlezen (ik heb een nieuwe.)
 
 udev rules
 * lsusb
